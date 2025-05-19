@@ -1,0 +1,41 @@
+plugins {
+    id 'java'
+    id 'org.openrewrite.rewrite' version '7.6.1'
+    id 'idea'
+}
+
+group = 'eda'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+
+    rewrite(platform('org.openrewrite.recipe:rewrite-recipe-bom:latest.release'))
+    rewrite('org.openrewrite.recipe:rewrite-logging-frameworks')
+    rewrite("org.openrewrite.recipe:rewrite-migrate-java")
+
+}
+
+rewrite {
+    activeRecipe(
+            'org.openrewrite.java.migrate.UpgradeToJava21',
+            'org.openrewrite.java.logging.SystemOutToLogging'
+    )
+
+    setExportDatatables(true)
+
+    activeStyle('org.openrewrite.java.IntelliJ')
+
+    configFile = project.getRootProject().file("rewrite.yml")
+
+}
+
+test {
+    useJUnitPlatform()
+}

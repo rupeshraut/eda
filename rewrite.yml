@@ -1,0 +1,11 @@
+type: specs.openrewrite.org/v1beta/recipe
+name: io.moderne.builder.YourRecipe
+displayName: Your recipe
+description: Created in the builder at https://app.moderne.io/recipes/builder
+recipeList:
+  - org.openrewrite.java.logging.SystemOutToLogging:
+      addLogger: true
+      loggingFramework: "JUL"
+      level: "info"
+      loggerName: "LOGGER"
+  - org.openrewrite.java.migrate.UpgradeToJava21
