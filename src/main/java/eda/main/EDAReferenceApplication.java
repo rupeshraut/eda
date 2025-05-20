@@ -1,7 +1,7 @@
 package eda.main;
 
-import eda.NotificationService;
-import eda.UserService;
+import eda.service.NotificationService;
+import eda.service.UserService;
 import eda.event.EventBus;
 import eda.resiliency.ResilientSagaExample;
 import eda.saga.ChoreographySaga;

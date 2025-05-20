@@ -1,4 +1,4 @@
-package eda;
+package eda.service;
 
 import eda.event.Event;
 import eda.event.EventBus;
