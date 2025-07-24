@@ -1,0 +1,118 @@
+package eda.examples;
+
+import eda.integration.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.jms.core.JmsTemplate;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.web.reactive.function.client.WebClient;
+
+import java.time.Duration;
+
+/**
+ * Spring Boot configuration for Integration Services
+ * 
+ * This configuration shows how to properly set up and configure
+ * all integration services with their dependencies.
+ */
+@Configuration
+public class IntegrationServiceConfiguration {
+    
+    @Value("${integration.rest.base-url:https://api.example.com}")
+    private String restBaseUrl;
+    
+    @Value("${integration.timeout.default:30}")
+    private int defaultTimeoutSeconds;
+    
+    @Value("${integration.retry.max-attempts:3}")
+    private int defaultRetryAttempts;
+    
+    /**
+     * Configure WebClient for REST integrations
+     */
+    @Bean
+    public WebClient webClient() {
+        return WebClient.builder()
+            .baseUrl(restBaseUrl)
+            .defaultHeader("User-Agent", "EDA-Integration-Service/1.0")
+            .defaultHeader("Accept", "application/json")
+            .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(1024 * 1024)) // 1MB
+            .build();
+    }
+    
+    /**
+     * Configure ObjectMapper for JSON serialization
+     */
+    @Bean
+    public ObjectMapper objectMapper() {
+        return new ObjectMapper()
+            .findAndRegisterModules(); // Auto-register JSR310 time module, etc.
+    }
+    
+    /**
+     * Configure ResilienceComponentManager with custom settings
+     */
+    @Bean
+    public ResilienceComponentManager resilienceComponentManager() {
+        return new ResilienceComponentManager();
+    }
+    
+    /**
+     * Configure default resilience settings
+     */
+    @Bean
+    public ResilienceConfig defaultResilienceConfig() {
+        return ResilienceConfig.builder()
+            .enableCircuitBreaker(true)
+            .circuitBreakerFailureThreshold(0.5)
+            .circuitBreakerMinCalls(5)
+            .circuitBreakerWaitDuration(Duration.ofSeconds(60))
+            .enableRetry(true)
+            .maxRetryAttempts(defaultRetryAttempts)
+            .retryDelay(Duration.ofSeconds(1))
+            .enableTimeout(true)
+            .timeout(Duration.ofSeconds(defaultTimeoutSeconds))
+            .build();
+    }
+    
+    /**
+     * Integration Service Beans - Uncomment and configure as needed
+     * These depend on the actual service implementations being available
+     */
+    
+    /*
+    @Bean
+    public RestIntegrationService restIntegrationService(
+            WebClient webClient,
+            ObjectMapper objectMapper,
+            ResilienceComponentManager resilienceManager) {
+        return new RestIntegrationService(webClient, objectMapper, resilienceManager);
+    }
+    
+    @Bean
+    public GraphQLIntegrationService graphqlIntegrationService(
+            WebClient webClient,
+            ObjectMapper objectMapper,
+            ResilienceComponentManager resilienceManager) {
+        return new GraphQLIntegrationService(webClient, objectMapper, resilienceManager);
+    }
+    
+    @Bean
+    public JmsIntegrationService jmsIntegrationService(
+            JmsTemplate jmsTemplate,
+            ObjectMapper objectMapper,
+            ResilienceComponentManager resilienceManager) {
+        return new JmsIntegrationService(jmsTemplate, objectMapper, resilienceManager);
+    }
+    
+    @Bean
+    public KafkaIntegrationService kafkaIntegrationService(
+            KafkaTemplate<String, Object> kafkaTemplate,
+            ObjectMapper objectMapper,
+            ResilienceComponentManager resilienceManager) {
+        return new KafkaIntegrationService(kafkaTemplate, objectMapper, resilienceManager);
+    }
+    */
+}

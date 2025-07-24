@@ -1,0 +1,429 @@
+package eda.examples;
+
+import eda.integration.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+
+import java.time.Duration;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.logging.Logger;
+
+/**
+ * Comprehensive usage examples for the Integration Service package
+ * 
+ * This example demonstrates how to use all integration types:
+ * - REST API calls
+ * - GraphQL queries
+ * - JMS messaging
+ * - Kafka event publishing
+ */
+@Component
+public class IntegrationServiceUsageExample {
+    private static final Logger LOGGER = Logger.getLogger(IntegrationServiceUsageExample.class.getName());
+    
+    @Autowired
+    private ResilienceComponentManager resilienceManager;
+    
+    // Services commented out until implementations are available
+    // @Autowired
+    // private RestIntegrationService restService;
+    
+    // @Autowired
+    // private GraphQLIntegrationService graphqlService;
+    
+    // @Autowired
+    // private JmsIntegrationService jmsService;
+    
+    // @Autowired
+    // private KafkaIntegrationService kafkaService;
+    
+    public void demonstrateAllIntegrations() {
+        LOGGER.info("=== Integration Service Usage Examples ===");
+        
+        try {
+            // 1. REST API Integration
+            demonstrateRestIntegration();
+            
+            // 2. GraphQL Integration  
+            demonstrateGraphQLIntegration();
+            
+            // 3. JMS Messaging Integration
+            demonstrateJmsIntegration();
+            
+            // 4. Kafka Event Integration
+            demonstrateKafkaIntegration();
+            
+            // 5. Advanced Configuration Examples
+            demonstrateAdvancedConfiguration();
+            
+        } catch (Exception e) {
+            LOGGER.severe("Integration demonstration failed: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Example 1: REST API Integration
+     * - Shows how to make REST API calls with resilience patterns
+     * - Demonstrates custom headers and configuration
+     */
+    public void demonstrateRestIntegration() {
+        LOGGER.info("1. REST Integration Example");
+        
+        // Create request payload
+        UserRegistrationRequest userRequest = new UserRegistrationRequest(
+            "john.doe@example.com", 
+            "John Doe", 
+            "premium"
+        );
+        
+        // Build integration request with custom resilience config
+        ResilienceConfig resilienceConfig = ResilienceConfig.builder()
+            .enableCircuitBreaker(true)
+            .enableRetry(true)
+            .enableTimeout(true)
+            .timeout(Duration.ofSeconds(10))
+            .maxRetryAttempts(3)
+            .retryDelay(Duration.ofSeconds(2))
+            .build();
+        
+        IntegrationRequest<UserRegistrationRequest> request = 
+            new GenericIntegrationRequest<>(
+                UUID.randomUUID().toString(),
+                userRequest,
+                IntegrationType.REST,
+                resilienceConfig
+            )
+            .withHeader("Authorization", "Bearer your-token-here")
+            .withHeader("Content-Type", "application/json")
+            .withHeader("X-Client-ID", "eda-integration-service");
+        
+        // Configuration for the target endpoint
+        IntegrationConfig config = new IntegrationConfig(
+            "https://api.example.com/users/register",
+            Map.of(
+                "timeout", "10000",
+                "retryable", "true"
+            )
+        );
+        
+        // Execute asynchronously
+        CompletableFuture<IntegrationResponse<UserRegistrationResponse>> future = 
+            restService.executeAsync(request, UserRegistrationResponse.class, config);
+        
+        // Handle response
+        future.thenAccept(response -> {
+            if (response.isSuccess()) {
+                LOGGER.info("✅ REST call successful: " + response.getData().userId());
+                LOGGER.info("Response metadata: " + response.getMetadata());
+            } else {
+                LOGGER.warning("❌ REST call failed: " + response.getErrorMessage());
+            }
+        }).exceptionally(throwable -> {
+            LOGGER.severe("REST integration error: " + throwable.getMessage());
+            return null;
+        });
+        
+        // Or execute synchronously
+        IntegrationResponse<UserRegistrationResponse> syncResponse = 
+            restService.executeSync(request, UserRegistrationResponse.class, config);
+            
+        if (syncResponse.isSuccess()) {
+            LOGGER.info("Sync REST response: " + syncResponse.getData());
+        }
+    }
+    
+    /**
+     * Example 2: GraphQL Integration
+     * - Shows how to execute GraphQL queries with variables
+     * - Demonstrates error handling for GraphQL-specific errors
+     */
+    public void demonstrateGraphQLIntegration() {
+        LOGGER.info("2. GraphQL Integration Example");
+        
+        // Create GraphQL query with variables
+        String query = """
+            query GetUserProfile($userId: ID!, $includeOrders: Boolean!) {
+                user(id: $userId) {
+                    id
+                    email
+                    profile {
+                        firstName
+                        lastName
+                        tier
+                    }
+                    orders @include(if: $includeOrders) {
+                        id
+                        total
+                        status
+                    }
+                }
+            }
+            """;
+        
+        Map<String, Object> variables = Map.of(
+            "userId", "user-123",
+            "includeOrders", true
+        );
+        
+        GraphQLRequest graphqlRequest = new GraphQLRequest(query, variables);
+        
+        IntegrationRequest<GraphQLRequest> request = 
+            new GenericIntegrationRequest<>(
+                UUID.randomUUID().toString(),
+                graphqlRequest,
+                IntegrationType.GRAPHQL
+            )
+            .withHeader("Authorization", "Bearer graphql-token")
+            .withHeader("X-Request-ID", UUID.randomUUID().toString());
+        
+        IntegrationConfig config = new IntegrationConfig(
+            "https://api.example.com/graphql",
+            Map.of("timeout", "15000")
+        );
+        
+        // Execute GraphQL query
+        graphqlService.executeAsync(request, GraphQLResponse.class, config)
+            .thenAccept(response -> {
+                if (response.isSuccess()) {
+                    GraphQLResponse graphqlResponse = response.getData();
+                    if (graphqlResponse.hasErrors()) {
+                        LOGGER.warning("GraphQL query had errors: " + graphqlResponse.getErrors());
+                    } else {
+                        LOGGER.info("✅ GraphQL query successful: " + graphqlResponse.getData());
+                    }
+                } else {
+                    LOGGER.warning("❌ GraphQL integration failed: " + response.getErrorMessage());
+                }
+            });
+    }
+    
+    /**
+     * Example 3: JMS Messaging Integration
+     * - Shows how to publish messages to JMS queues
+     * - Demonstrates correlation ID propagation
+     */
+    public void demonstrateJmsIntegration() {
+        LOGGER.info("3. JMS Integration Example");
+        
+        // Create order event
+        OrderEvent orderEvent = new OrderEvent(
+            "ORDER-456",
+            "customer-789",
+            299.99,
+            "CREATED"
+        );
+        
+        IntegrationRequest<OrderEvent> request = 
+            new GenericIntegrationRequest<>(
+                UUID.randomUUID().toString(),
+                orderEvent,
+                IntegrationType.JMS
+            )
+            .withHeader("JMSPriority", "5")
+            .withHeader("JMSExpiration", String.valueOf(System.currentTimeMillis() + 300000))
+            .withHeader("CustomProperty", "order-processing");
+        
+        IntegrationConfig config = new IntegrationConfig(
+            "order.processing.queue",
+            Map.of(
+                "deliveryMode", "PERSISTENT",
+                "timeToLive", "300000"
+            )
+        );
+        
+        // Publish to JMS queue
+        jmsService.executeAsync(request, Void.class, config)
+            .thenAccept(response -> {
+                if (response.isSuccess()) {
+                    LOGGER.info("✅ JMS message published successfully");
+                    LOGGER.info("Message ID: " + response.getCorrelationId());
+                } else {
+                    LOGGER.warning("❌ JMS publishing failed: " + response.getErrorMessage());
+                }
+            });
+    }
+    
+    /**
+     * Example 4: Kafka Event Integration
+     * - Shows how to publish events to Kafka topics
+     * - Demonstrates partitioning and callback handling
+     */
+    public void demonstrateKafkaIntegration() {
+        LOGGER.info("4. Kafka Integration Example");
+        
+        // Create user activity event
+        UserActivityEvent activityEvent = new UserActivityEvent(
+            "user-123",
+            "LOGIN",
+            System.currentTimeMillis(),
+            Map.of(
+                "source", "web-app",
+                "location", "US-WEST",
+                "device", "desktop"
+            )
+        );
+        
+        IntegrationRequest<UserActivityEvent> request = 
+            new GenericIntegrationRequest<>(
+                UUID.randomUUID().toString(),
+                activityEvent,
+                IntegrationType.KAFKA
+            )
+            .withHeader("kafka.key", activityEvent.userId()) // For partitioning
+            .withHeader("kafka.partition", "0")
+            .withHeader("event.type", "USER_ACTIVITY");
+        
+        IntegrationConfig config = new IntegrationConfig(
+            "user.activity.events",
+            Map.of(
+                "acks", "all",
+                "retries", "3",
+                "compression.type", "snappy"
+            )
+        );
+        
+        // Publish to Kafka topic
+        kafkaService.executeAsync(request, Void.class, config)
+            .thenAccept(response -> {
+                if (response.isSuccess()) {
+                    LOGGER.info("✅ Kafka event published successfully");
+                    LOGGER.info("Topic: " + config.getEndpoint());
+                    LOGGER.info("Correlation ID: " + response.getCorrelationId());
+                } else {
+                    LOGGER.warning("❌ Kafka publishing failed: " + response.getErrorMessage());
+                }
+            });
+    }
+    
+    /**
+     * Example 5: Advanced Configuration and Error Handling
+     * - Shows custom resilience configuration
+     * - Demonstrates error handling patterns
+     */
+    public void demonstrateAdvancedConfiguration() {
+        LOGGER.info("5. Advanced Configuration Example");
+        
+        // Custom resilience configuration for critical operations
+        ResilienceConfig criticalOperationConfig = ResilienceConfig.builder()
+            .enableCircuitBreaker(true)
+            .circuitBreakerFailureThreshold(0.3)  // Open circuit at 30% failure rate
+            .circuitBreakerMinCalls(10)     // Need 10 calls before evaluation
+            .circuitBreakerWaitDuration(Duration.ofMinutes(2))
+            .enableRetry(true)
+            .maxRetryAttempts(5)                        // More retries for critical ops
+            .retryDelay(Duration.ofSeconds(1))
+            .enableTimeout(true)
+            .timeout(Duration.ofSeconds(30))            // Longer timeout
+            .build();
+        
+        // High-volume, non-critical operation config
+        ResilienceConfig highVolumeConfig = ResilienceConfig.builder()
+            .enableCircuitBreaker(true)
+            .circuitBreakerFailureThreshold(0.6)  // More tolerant of failures
+            .enableRetry(false)                         // No retries for high volume
+            .enableTimeout(true)
+            .timeout(Duration.ofSeconds(5))             // Quick timeout
+            .build();
+        
+        // Example: Critical payment processing
+        PaymentRequest paymentRequest = new PaymentRequest(
+            "payment-789",
+            1999.99,
+            "USD",
+            "credit-card"
+        );
+        
+        IntegrationRequest<PaymentRequest> criticalRequest = 
+            new GenericIntegrationRequest<>(
+                UUID.randomUUID().toString(),
+                paymentRequest,
+                IntegrationType.REST,
+                criticalOperationConfig
+            );
+        
+        IntegrationConfig paymentConfig = new IntegrationConfig(
+            "https://payments.example.com/process",
+            Map.of("idempotency", "true")
+        );
+        
+        // Execute with comprehensive error handling
+        restService.executeAsync(criticalRequest, PaymentResponse.class, paymentConfig)
+            .handle((response, throwable) -> {
+                if (throwable != null) {
+                    LOGGER.severe("Critical payment operation failed: " + throwable.getMessage());
+                    // Implement compensating actions
+                    handlePaymentFailure(paymentRequest, throwable);
+                    return null;
+                }
+                
+                if (response.isSuccess()) {
+                    LOGGER.info("✅ Payment processed successfully: " + response.getData().transactionId());
+                    // Process success workflow
+                    handlePaymentSuccess(response.getData());
+                } else {
+                    LOGGER.warning("❌ Payment processing failed: " + response.getErrorMessage());
+                    // Handle business logic failures
+                    handlePaymentBusinessFailure(response);
+                }
+                
+                return response;
+            });
+    }
+    
+    // Helper methods for demonstration
+    private void handlePaymentFailure(PaymentRequest request, Throwable error) {
+        LOGGER.info("Implementing compensating actions for payment failure");
+        // Implement compensation logic
+    }
+    
+    private void handlePaymentSuccess(PaymentResponse response) {
+        LOGGER.info("Processing successful payment workflow");
+        // Implement success workflow
+    }
+    
+    private void handlePaymentBusinessFailure(IntegrationResponse<PaymentResponse> response) {
+        LOGGER.info("Handling business logic failure");
+        // Implement business failure handling
+    }
+    
+    // ============ Data Classes for Examples ============
+    
+    record UserRegistrationRequest(String email, String name, String tier) {}
+    record UserRegistrationResponse(String userId, String status, long timestamp) {}
+    
+    record OrderEvent(String orderId, String customerId, double amount, String status) {}
+    
+    record UserActivityEvent(String userId, String action, long timestamp, Map<String, String> metadata) {}
+    
+    record PaymentRequest(String paymentId, double amount, String currency, String method) {}
+    record PaymentResponse(String transactionId, String status, double amount) {}
+    
+    // GraphQL-specific classes
+    static class GraphQLRequest {
+        private final String query;
+        private final Map<String, Object> variables;
+        
+        public GraphQLRequest(String query, Map<String, Object> variables) {
+            this.query = query;
+            this.variables = variables;
+        }
+        
+        public String getQuery() { return query; }
+        public Map<String, Object> getVariables() { return variables; }
+    }
+    
+    static class GraphQLResponse {
+        private Object data;
+        private java.util.List<String> errors;
+        
+        public Object getData() { return data; }
+        public void setData(Object data) { this.data = data; }
+        
+        public java.util.List<String> getErrors() { return errors; }
+        public void setErrors(java.util.List<String> errors) { this.errors = errors; }
+        
+        public boolean hasErrors() { return errors != null && !errors.isEmpty(); }
+    }
+}
