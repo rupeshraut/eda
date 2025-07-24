@@ -3,10 +3,16 @@ package eda.eventbus.kafka;
 import eda.eventbus.EventBusConfig;
 import eda.eventbus.GenericEventBus;
 import eda.eventbus.core.GenericEvent;
+import eda.eventbus.kafka.monitoring.KafkaMetricsCollector;
+import eda.eventbus.kafka.monitoring.AlertManager;
+import eda.eventbus.kafka.monitoring.KafkaHealthStatus;
+import eda.eventbus.kafka.monitoring.KafkaMetricsSnapshot;
 import eda.eventbus.subscription.EventConsumer;
 import eda.eventbus.subscription.EventSubscription;
 import eda.eventbus.subscription.SubscriptionOptions;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
@@ -20,6 +26,7 @@ public class KafkaIntegratedEventBus<T> extends GenericEventBus<T> {
     private final KafkaEventBusConfig kafkaConfig;
     private final KafkaEventPublisher kafkaPublisher;
     private final KafkaEventConsumer<T> kafkaConsumer;
+    private final KafkaMetricsCollector metricsCollector;
     private final ConcurrentHashMap<String, String> topicMappings = new ConcurrentHashMap<>();
     private final boolean publishToKafka;
     private final boolean consumeFromKafka;
@@ -36,10 +43,17 @@ public class KafkaIntegratedEventBus<T> extends GenericEventBus<T> {
         this.publishToKafka = publishToKafka;
         this.consumeFromKafka = consumeFromKafka;
         
+        // Initialize monitoring
+        this.metricsCollector = new KafkaMetricsCollector()
+            .enableMetrics()
+            .enableLagMonitoring()
+            .enableThroughputTracking()
+            .enableErrorTracking();
+        
         this.kafkaPublisher = publishToKafka ? new KafkaEventPublisher(kafkaConfig) : null;
         this.kafkaConsumer = consumeFromKafka ? new KafkaEventConsumer<>(kafkaConfig, this, eventTypeClass) : null;
         
-        LOGGER.info("Kafka integrated event bus initialized - Publish: " + publishToKafka + ", Consume: " + consumeFromKafka);
+        LOGGER.info("Kafka integrated event bus initialized with monitoring - Publish: " + publishToKafka + ", Consume: " + consumeFromKafka);
     }
     
     /**
@@ -145,6 +159,82 @@ public class KafkaIntegratedEventBus<T> extends GenericEventBus<T> {
     }
     
     /**
+     * Get metrics collector for monitoring
+     */
+    public KafkaMetricsCollector getMetricsCollector() {
+        return metricsCollector;
+    }
+    
+    /**
+     * Get alert manager for alert configuration
+     */
+    public AlertManager getAlertManager() {
+        return metricsCollector.getAlertManager();
+    }
+    
+    /**
+     * Get current Kafka metrics snapshot
+     */
+    public CompletableFuture<KafkaMetricsSnapshot> getMetricsSnapshot() {
+        return metricsCollector.getMetricsSnapshot();
+    }
+    
+    /**
+     * Get Kafka health status
+     */
+    public CompletableFuture<KafkaHealthStatus> getHealthStatus() {
+        return metricsCollector.getHealthStatus();
+    }
+    
+    /**
+     * Export metrics in Prometheus format
+     */
+    public CompletableFuture<String> exportPrometheusMetrics() {
+        return metricsCollector.exportPrometheusMetrics();
+    }
+    
+    /**
+     * Export metrics in JSON format
+     */
+    public CompletableFuture<String> exportJsonMetrics() {
+        return metricsCollector.exportJsonMetrics();
+    }
+    
+    /**
+     * Record connection status for monitoring
+     */
+    public void recordConnectionStatus(String brokerId, boolean connected) {
+        metricsCollector.recordConnectionStatus(brokerId, connected);
+    }
+    
+    /**
+     * Configure lag alert monitoring
+     */
+    public KafkaIntegratedEventBus<T> configureConsumerLagAlert(Duration threshold, 
+            java.util.function.Consumer<eda.eventbus.kafka.monitoring.AlertTypes.ConsumerLagAlert> handler) {
+        metricsCollector.onConsumerLag(threshold, handler);
+        return this;
+    }
+    
+    /**
+     * Configure error rate alert monitoring
+     */
+    public KafkaIntegratedEventBus<T> configureErrorRateAlert(double threshold, 
+            java.util.function.Consumer<eda.eventbus.kafka.monitoring.AlertTypes.ErrorRateAlert> handler) {
+        metricsCollector.onErrorRate(threshold, handler);
+        return this;
+    }
+    
+    /**
+     * Configure throughput change alert monitoring
+     */
+    public KafkaIntegratedEventBus<T> configureThroughputAlert(double thresholdPercent, 
+            java.util.function.Consumer<eda.eventbus.kafka.monitoring.AlertTypes.ThroughputAlert> handler) {
+        metricsCollector.onThroughputChange(thresholdPercent, handler);
+        return this;
+    }
+    
+    /**
      * Graceful shutdown including Kafka components
      */
     @Override
@@ -159,6 +249,11 @@ public class KafkaIntegratedEventBus<T> extends GenericEventBus<T> {
         // Shutdown Kafka publisher
         if (kafkaPublisher != null) {
             kafkaPublisher.shutdown();
+        }
+        
+        // Shutdown metrics collector
+        if (metricsCollector != null) {
+            metricsCollector.shutdown();
         }
         
         // Shutdown local event bus
